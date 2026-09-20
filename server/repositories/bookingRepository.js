@@ -164,11 +164,12 @@ export async function createBookingInDb(payload) {
     latitude,
     longitude,
     scheduledAt,
-    amount,
+    // NOTE: any client-supplied `amount` is intentionally ignored below.
+    // The trusted amount always comes from Service.basePrice in the database.
   } = payload || {};
 
-  if (!workerId || !serviceId || !scheduledAt || amount === undefined) {
-    const error = new Error('workerId, serviceId, scheduledAt, and amount are required.');
+  if (!workerId || !serviceId || !scheduledAt) {
+    const error = new Error('workerId, serviceId, and scheduledAt are required.');
     error.statusCode = 400;
     throw error;
   }
@@ -186,12 +187,20 @@ export async function createBookingInDb(payload) {
     throw error;
   }
 
-  await verifyBookingReferences({ customerId, workerId, serviceId: resolvedServiceId });
+  const { service } = await verifyBookingReferences({ customerId, workerId, serviceId: resolvedServiceId });
 
-  const parsedAmount = Number(amount);
-  if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
-    const error = new Error('Amount must be a non-negative number.');
+  if (service.isActive === false) {
+    const error = new Error('This service is not currently available for booking.');
     error.statusCode = 400;
+    throw error;
+  }
+
+  // Server-side source of truth: the booking amount is always the service's
+  // trusted base price, never a value supplied by the client.
+  const parsedAmount = Number(service.basePrice);
+  if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+    const error = new Error('Service price is invalid or missing.');
+    error.statusCode = 500;
     throw error;
   }
 
